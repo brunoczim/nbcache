@@ -1,0 +1,20 @@
+use nbcache::raw::NbCache;
+
+fn main() {
+    let cache = NbCache::<1, 1>::new(7);
+
+    cache.put([123], [0]);
+    cache.put([456], [1]);
+    cache.put([789], [2]);
+    cache.put([12], [3]);
+    cache.put([345], [4]);
+    cache.delete([12]);
+
+    println!("{:?}", cache.get([123]));
+    println!("{:?}", cache.get([456]));
+    println!("{:?}", cache.get([789]));
+    println!("{:?}", cache.get([12]));
+    println!("{:?}", cache.get([345]));
+    println!("{:?}", cache.get([678]));
+    println!("{:?}", cache.get([901]));
+}
