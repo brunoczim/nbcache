@@ -169,10 +169,40 @@ impl<const K: usize, const V: usize> Entry<K, V> {
     //    whose per-word tags all match the current tag and so passes the reader
     //    check in `read_pair`.
     //
-    // A fix needs the write path to claim the alternate before mutating it
-    // (e.g. reserve it with a `version` CAS, or tag writers distinctly) so that
-    // at most one writer mutates a given alternate per version. Left as-is
-    // pending review; single-writer use with concurrent readers is fine.
+    // Left as-is pending review; single-writer use with concurrent readers is
+    // fine.
+    //
+    // RECOMMENDED FIX (not yet applied): reserve the alternate via the version
+    // word so writers are mutually exclusive per slot while reads stay
+    // non-blocking. Add a write-lock bit to `version`:
+    //
+    //     version = (tag << 2) | (write_lock << 1) | current_index
+    //
+    // Readers are unchanged in spirit: `current = version & 1`,
+    // `tag = version >> 2`, and the lock bit is ignored (a writer never touches
+    // the current alternate, so reads stay consistent).
+    //
+    // Writer:
+    //   1. Load `version`; if the lock bit is set, retry (a writer is active).
+    //   2. CAS `version` -> `version | LOCK` to acquire exclusive write access;
+    //      retry on failure.
+    //   3. Own the non-current alternate exclusively: store every word with
+    //      `next_tag` via plain `Release` stores. No per-word CAS and no
+    //      `outdated` check are needed, because no other writer can touch it.
+    //   4. Publish with a single `Release` store of
+    //      `version = (next_tag << 2) | next_alt_index` (lock cleared, current
+    //      flipped). No CAS is needed: while we hold the lock no other writer
+    //      changes `version`, and readers never write it.
+    //
+    // `write_key_if_equal` uses the same acquire step, then reads the current
+    // key directly (stable under the lock) to compare against `expected`.
+    //
+    // This removes the `outdated` flag and the in-loop CAS retries entirely (a
+    // net simplification). Trade-off: writers serialize per slot rather than
+    // racing lock-free, while reads remain non-blocking, which matches this
+    // crate's intent. Alternatives: (a) document a single-writer-per-slot
+    // contract and keep this code as-is; (b) a true lock-free multi-writer
+    // scheme, which is substantially more complex and likely overkill here.
     pub fn write_pair(&self, key: Key<K>, value: Value<V>) {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
