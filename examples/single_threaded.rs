@@ -3,6 +3,7 @@ use nbcache::raw::NbCache;
 fn main() {
     let cache = NbCache::<1, 1>::new(7);
 
+    println!("Putting data into the cache");
     cache.put([123], [0]);
     cache.put([456], [1]);
     cache.put([789], [2]);
@@ -10,6 +11,7 @@ fn main() {
     cache.put([345], [4]);
     cache.delete([12]);
 
+    println!("Getting data from the cache");
     println!("{:?}", cache.get([123]));
     println!("{:?}", cache.get([456]));
     println!("{:?}", cache.get([789]));

@@ -6,6 +6,16 @@ use std::{
 pub type Key<const K: usize> = [u32; K];
 pub type Value<const V: usize> = [u32; V];
 
+fn tag_preceeds(this: u32, that: u32) -> bool {
+    const HALF_DISTANCE: u32 = u32::MAX >> 1;
+
+    if this <= that {
+        that - this <= HALF_DISTANCE
+    } else {
+        this - that > HALF_DISTANCE
+    }
+}
+
 pub type NbCache<const K: usize, const V: usize> =
     NbCacheWith<RandomState, K, V>;
 
@@ -92,8 +102,8 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
         'main: loop {
-            let alternate_index = (curr_version & 1) as usize;
-            let tag = curr_version >> 1;
+            let alternate_index = (curr_version >> 63) as usize;
+            let tag = curr_version & 0xff_ff_ff_ff;
             let alternate = &self.alternates[alternate_index];
 
             let mut key = [0; K];
@@ -118,12 +128,12 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         }
     }
 
-    pub fn read_versioned_key(&self) -> (Key<K>, u64) {
+    pub fn read_key(&self) -> Key<K> {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
         'main: loop {
-            let alternate_index = (curr_version & 1) as usize;
-            let tag = curr_version >> 1;
+            let alternate_index = (curr_version >> 63) as usize;
+            let tag = curr_version & 0xff_ff_ff_ff;
             let alternate = &self.alternates[alternate_index];
 
             let mut key = [0; K];
@@ -132,29 +142,28 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 let data = src.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 let tag_low = tag & 0xff_ff_ff_ff;
-                if embedded_tag != tag_low {
+                if !tag_preceeds(tag_low as u32, embedded_tag as u32) {
                     curr_version = self.version.load(Ordering::Acquire);
                     continue 'main;
                 }
                 *dest = data as u32;
             }
 
-            break (key, curr_version);
+            break key;
         }
     }
 
     pub fn write_pair(&self, key: Key<K>, value: Value<V>) {
-        let mut curr_version = self.version.load(Ordering::Acquire);
-
         'main: loop {
-            let alternate_index = (curr_version & 1) as usize;
-            let next_alt_index = 1 - alternate_index;
-            let tag = curr_version >> 1;
-            let alternate = &self.alternates[next_alt_index];
-            let prev_tag = tag.wrapping_sub(1);
-            let next_tag = tag.wrapping_add(1);
+            let (prev_version, curr_version) = self.start_write();
 
-            let mut outdated = false;
+            let alternate_index = (prev_version >> 63) as usize;
+            let prev_tag = prev_version & 0xff_ff_ff_ff;
+            let prev_tag_low = prev_tag & 0xff_ff_ff_ff;
+            let next_alt_index = 1 - alternate_index;
+            let alternate = &self.alternates[next_alt_index];
+            let next_tag = curr_version & 0xff_ff_ff_ff;
+
             for (dest, src) in alternate
                 .key
                 .iter()
@@ -163,9 +172,8 @@ impl<const K: usize, const V: usize> Entry<K, V> {
             {
                 let data = dest.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
-                let prev_tag_low = prev_tag & 0xff_ff_ff_ff;
-                if embedded_tag != prev_tag_low {
-                    outdated = true;
+                if !tag_preceeds(embedded_tag as u32, prev_tag_low as u32) {
+                    continue 'main;
                 }
                 let new_data = u64::from(src) | (next_tag << 32);
                 if dest
@@ -177,50 +185,47 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                     )
                     .is_err()
                 {
-                    curr_version = self.version.load(Ordering::Acquire);
                     continue 'main;
                 }
             }
 
-            if outdated {
-                curr_version = self.version.load(Ordering::Acquire);
-                continue;
-            }
-
-            let next_version = (next_tag << 1) | next_alt_index as u64;
-            match self.version.compare_exchange(
-                curr_version,
-                next_version,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(actual) => curr_version = actual,
+            let next_version = next_tag | ((next_alt_index as u64) << 63);
+            if self
+                .version
+                .compare_exchange(
+                    curr_version,
+                    next_version,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                break;
             }
         }
     }
 
     pub fn write_key_if_equal(&self, expected: Key<K>, new: Key<K>) -> bool {
         'main: loop {
-            let (curr_key, curr_version) = self.read_versioned_key();
+            let curr_key = self.read_key();
             if curr_key != expected {
                 return false;
             }
 
-            let alternate_index = (curr_version & 1) as usize;
-            let next_alt_index = 1 - alternate_index;
-            let tag = curr_version >> 1;
-            let alternate = &self.alternates[next_alt_index];
-            let prev_tag = tag.wrapping_sub(1);
-            let next_tag = tag.wrapping_add(1);
+            let (prev_version, curr_version) = self.start_write();
 
-            let mut outdated = false;
+            let alternate_index = (prev_version >> 63) as usize;
+            let prev_tag = prev_version & 0xff_ff_ff_ff;
+            let prev_tag_low = prev_tag & 0xff_ff_ff_ff;
+            let next_alt_index = 1 - alternate_index;
+            let alternate = &self.alternates[next_alt_index];
+            let next_tag = curr_version & 0xff_ff_ff_ff;
+
             for (dest, src) in alternate.key.iter().zip(new.into_iter()) {
                 let data = dest.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
-                let prev_tag_low = prev_tag & 0xff_ff_ff_ff;
-                if embedded_tag != prev_tag_low {
-                    outdated = true;
+                if !tag_preceeds(embedded_tag as u32, prev_tag_low as u32) {
+                    continue 'main;
                 }
                 let new_data = u64::from(src) | (next_tag << 32);
                 if dest
@@ -240,8 +245,8 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 let data = dest.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 let prev_tag_low = prev_tag & 0xff_ff_ff_ff;
-                if embedded_tag != prev_tag_low {
-                    outdated = true;
+                if !tag_preceeds(embedded_tag as u32, prev_tag_low as u32) {
+                    continue 'main;
                 }
                 let new_data = next_tag << 32;
                 if dest
@@ -257,11 +262,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 }
             }
 
-            if outdated {
-                continue;
-            }
-
-            let next_version = (next_tag << 1) | next_alt_index as u64;
+            let next_version = next_tag | ((next_alt_index as u64) << 63);
             if self
                 .version
                 .compare_exchange(
@@ -273,6 +274,28 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 .is_ok()
             {
                 return true;
+            }
+        }
+    }
+
+    fn start_write(&self) -> (u64, u64) {
+        let current = self.version.load(Ordering::Acquire);
+        self.start_write_from(current)
+    }
+
+    fn start_write_from(&self, mut current: u64) -> (u64, u64) {
+        loop {
+            let next = ((current + 1) & 0xff_ff_ff_ff)
+                | (current & (0xff_ff_ff_ff << 32));
+
+            match self.version.compare_exchange(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(prev) => break (prev, next),
+                Err(actual) => current = actual,
             }
         }
     }
