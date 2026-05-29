@@ -1,0 +1,3 @@
+[alias]
+# Run the workspace task runner: `cargo xtask <fmt|clippy|test|coverage|loom>`.
+xtask = "run --quiet --package xtask --"

@@ -2,5 +2,22 @@
 name = "nbcache"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
+
+# `loom` is a custom cfg (not a Cargo feature); register it so the compiler's
+# `unexpected_cfgs` lint stays quiet on normal builds.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+
+# `loom` supplies instrumented atomics for exhaustive concurrency-model tests.
+# It is only compiled when building/testing under `--cfg loom` (see
+# `cargo xtask loom`); ordinary builds and tests use `std` atomics and never
+# pull this dependency in.
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+[workspace]
+members = ["xtask"]
+resolver = "3"
