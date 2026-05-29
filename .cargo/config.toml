@@ -1,0 +1,12 @@
+[alias]
+# Run the workspace task runner: `cargo xtask <fmt|clippy|test|coverage|loom>`.
+xtask = "run --quiet --package xtask --"
+
+# Per-command shortcuts so each task can be run on its own. Cargo resolves
+# aliases recursively, so these chain through `xtask` above. Extra args are
+# forwarded, e.g. `cargo xfmt --check` or `cargo xcoverage --html`.
+xfmt = "xtask fmt"
+xclippy = "xtask clippy"
+xtest = "xtask test"
+xcoverage = "xtask coverage"
+xloom = "xtask loom"

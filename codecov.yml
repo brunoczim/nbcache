@@ -1,0 +1,23 @@
+coverage:
+  status:
+    project:
+      default:
+        # Block merges that drop overall coverage by more than the threshold.
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        # New/changed lines should be well covered.
+        target: 80%
+
+comment:
+  layout: "reach, diff, flags"
+  behavior: default
+  require_changes: true
+
+# The task runner and examples are tooling/demo code, not part of the library
+# surface we measure.
+ignore:
+  - "xtask/**"
+  - "examples/**"
+  - "tests/**"
