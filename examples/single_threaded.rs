@@ -1,7 +1,7 @@
-use nbcache::raw::NbCache;
+use nbcache::raw::OfCache;
 
 fn main() {
-    let cache = NbCache::<1, 1>::new(7);
+    let cache = OfCache::<1, 1>::new(7);
 
     println!("Putting data into the cache");
     cache.put([123], [0]);

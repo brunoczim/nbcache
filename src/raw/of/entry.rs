@@ -1,10 +1,6 @@
-use std::{
-    hash::{BuildHasher, RandomState},
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-pub type Key<const K: usize> = [u32; K];
-pub type Value<const V: usize> = [u32; V];
+use super::{Key, Value};
 
 fn tag_preceeds(this: u32, that: u32) -> bool {
     const HALF_DISTANCE: u32 = u32::MAX >> 1;
@@ -16,73 +12,8 @@ fn tag_preceeds(this: u32, that: u32) -> bool {
     }
 }
 
-pub type NbCache<const K: usize, const V: usize> =
-    NbCacheWith<RandomState, K, V>;
-
 #[derive(Debug)]
-pub struct NbCacheWith<H, const K: usize, const V: usize> {
-    entries: Box<[Entry<K, V>]>,
-    build_hasher: H,
-    empty_key: Key<K>,
-}
-
-impl<const K: usize, const V: usize> NbCache<K, V> {
-    pub fn new(size: usize) -> Self {
-        Self::with_hasher(size, RandomState::new())
-    }
-
-    pub fn with_empty(size: usize, empty_key: Key<K>) -> Self {
-        Self::with_hasher_and_empty(size, RandomState::new(), empty_key)
-    }
-}
-
-impl<H, const K: usize, const V: usize> NbCacheWith<H, K, V>
-where
-    H: BuildHasher,
-{
-    pub fn with_hasher(size: usize, build_hasher: H) -> Self {
-        Self::with_hasher_and_empty(size, build_hasher, [0; K])
-    }
-
-    pub fn with_hasher_and_empty(
-        size: usize,
-        build_hasher: H,
-        empty_key: Key<K>,
-    ) -> Self {
-        assert_ne!(size, 0);
-
-        let mut entries = Vec::with_capacity(size);
-        for _ in 0 .. size {
-            entries.push(Entry::new(empty_key));
-        }
-        Self { entries: entries.into(), build_hasher, empty_key }
-    }
-
-    pub fn get(&self, key: Key<K>) -> Option<Value<V>> {
-        let hash = self.build_hasher.hash_one(key);
-        let size = self.entries.len() as u64;
-        let index = (hash % size) as usize;
-        let (stored_key, stored_value) = self.entries[index].read_pair();
-        if stored_key == key { Some(stored_value) } else { None }
-    }
-
-    pub fn put(&self, key: Key<K>, value: Value<V>) {
-        let hash = self.build_hasher.hash_one(key);
-        let size = self.entries.len() as u64;
-        let index = (hash % size) as usize;
-        self.entries[index].write_pair(key, value);
-    }
-
-    pub fn delete(&self, key: Key<K>) -> bool {
-        let hash = self.build_hasher.hash_one(key);
-        let size = self.entries.len() as u64;
-        let index = (hash % size) as usize;
-        self.entries[index].write_key_if_equal(key, self.empty_key)
-    }
-}
-
-#[derive(Debug)]
-struct Entry<const K: usize, const V: usize> {
+pub struct Entry<const K: usize, const V: usize> {
     version: AtomicU64,
     alternates: [EntryAlternate<K, V>; 2],
 }
@@ -128,7 +59,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         }
     }
 
-    pub fn read_key(&self) -> Key<K> {
+    pub fn read_key_versioned(&self) -> (Key<K>, u64) {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
         'main: loop {
@@ -149,7 +80,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 *dest = data as u32;
             }
 
-            break key;
+            break (key, curr_version);
         }
     }
 
@@ -207,12 +138,16 @@ impl<const K: usize, const V: usize> Entry<K, V> {
 
     pub fn write_key_if_equal(&self, expected: Key<K>, new: Key<K>) -> bool {
         'main: loop {
-            let curr_key = self.read_key();
-            if curr_key != expected {
-                return false;
-            }
+            let (prev_version, curr_version) = loop {
+                let (curr_key, curr_version) = self.read_key_versioned();
+                if curr_key != expected {
+                    return false;
+                }
 
-            let (prev_version, curr_version) = self.start_write();
+                if let Ok(tuple) = self.start_write_weak(curr_version) {
+                    break tuple;
+                }
+            };
 
             let alternate_index = (prev_version >> 63) as usize;
             let prev_tag = prev_version & 0xff_ff_ff_ff;
@@ -285,18 +220,25 @@ impl<const K: usize, const V: usize> Entry<K, V> {
 
     fn start_write_from(&self, mut current: u64) -> (u64, u64) {
         loop {
-            let next = ((current + 1) & 0xff_ff_ff_ff)
-                | (current & (0xff_ff_ff_ff << 32));
-
-            match self.version.compare_exchange(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(prev) => break (prev, next),
+            match self.start_write_weak(current) {
+                Ok((prev, next)) => break (prev, next),
                 Err(actual) => current = actual,
             }
+        }
+    }
+
+    fn start_write_weak(&self, current: u64) -> Result<(u64, u64), u64> {
+        let next =
+            ((current + 1) & 0xff_ff_ff_ff) | (current & (0xff_ff_ff_ff << 32));
+
+        match self.version.compare_exchange(
+            current,
+            next,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(prev) => Ok((prev, next)),
+            Err(actual) => Err(actual),
         }
     }
 }
@@ -319,5 +261,144 @@ impl<const K: usize, const V: usize> EntryAlternate<K, V> {
                 .map(|bits| bits | ((tag as u64) << 32))
                 .map(AtomicU64::new),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{Entry, tag_preceeds};
+
+    #[test]
+    fn same_tag_preceeds() {
+        let has_relation = tag_preceeds(40, 40);
+        assert!(has_relation);
+    }
+
+    #[test]
+    fn one_below_tag_preceeds() {
+        let has_relation = tag_preceeds(39, 40);
+        assert!(has_relation);
+    }
+
+    #[test]
+    fn far_below_tag_preceeds() {
+        let has_relation = tag_preceeds(0, 40);
+        assert!(has_relation);
+    }
+
+    #[test]
+    fn far_below_tag_preceeds_wrap_around() {
+        let has_relation = tag_preceeds(u32::MAX - 1, 40);
+        assert!(has_relation);
+    }
+
+    #[test]
+    fn far_below_tag_preceeds_near_limit() {
+        let has_relation = tag_preceeds(0, u32::MAX >> 1);
+        assert!(has_relation);
+    }
+
+    #[test]
+    fn far_below_tag_preceeds_near_limit_wrap_around() {
+        let has_relation = tag_preceeds(u32::MAX, u32::MAX >> 1);
+        assert!(has_relation);
+    }
+
+    #[test]
+    fn one_above_tag_preceeds_false() {
+        let has_relation = tag_preceeds(41, 40);
+        assert!(!has_relation);
+    }
+
+    #[test]
+    fn far_above_tag_preceeds_false() {
+        let has_relation = tag_preceeds(100, 40);
+        assert!(!has_relation);
+    }
+
+    #[test]
+    fn far_above_tag_preceeds_wrap_around_false() {
+        let has_relation = tag_preceeds(100, u32::MAX - 1);
+        assert!(!has_relation);
+    }
+
+    #[test]
+    fn far_above_tag_preceeds_near_limit_false() {
+        let has_relation = tag_preceeds(0, (u32::MAX >> 1) + 1);
+        assert!(!has_relation);
+    }
+
+    #[test]
+    fn far_below_tag_preceeds_near_limit_wrap_around_false() {
+        let has_relation = tag_preceeds(u32::MAX, (u32::MAX >> 1) + 1);
+        assert!(!has_relation);
+    }
+
+    #[test]
+    fn read_pair_empty() {
+        let entry = Entry::new([1, 2]);
+        let (key, value) = entry.read_pair();
+        assert_eq!(key, [1, 2]);
+        assert_eq!(value, [0, 0]);
+    }
+
+    #[test]
+    fn read_key_versioned_empty() {
+        let entry = Entry::<2, 1>::new([1, 2]);
+        let (key, version) = entry.read_key_versioned();
+        assert_eq!(key, [1, 2]);
+        assert_eq!(version, 0);
+    }
+
+    #[test]
+    fn write_pair_entails_read_pair() {
+        let entry = Entry::new([0; 4]);
+        entry.write_pair([1, 2, 3, 40], [3, 4, 5]);
+        let (key, value) = entry.read_pair();
+        assert_eq!(key, [1, 2, 3, 40]);
+        assert_eq!(value, [3, 4, 5]);
+    }
+
+    #[test]
+    fn write_pair_entails_read_key_versioned() {
+        let entry = Entry::new([0; 4]);
+        entry.write_pair([1, 2, 3, 40], [3, 4, 5]);
+        let (key, version) = entry.read_key_versioned();
+        assert_eq!(key, [1, 2, 3, 40]);
+        assert_eq!(version, 1 | (1 << 63));
+    }
+
+    #[test]
+    fn write_key_if_equal_success() {
+        let entry = Entry::<4, 1>::new([10, u32::MAX - 4, 3, 4]);
+        let success = entry
+            .write_key_if_equal([10, u32::MAX - 4, 3, 4], [221, 232, 10, 20]);
+        assert!(success);
+    }
+
+    #[test]
+    fn write_key_if_equal_failure() {
+        let entry = Entry::<4, 1>::new([10, u32::MAX - 4, 3, 4]);
+        let success = entry
+            .write_key_if_equal([0, u32::MAX - 4, 3, 4], [221, 232, 10, 20]);
+        assert!(!success);
+    }
+
+    #[test]
+    fn write_key_if_equal_success_entails_read_pair() {
+        let entry = Entry::new([10, u32::MAX - 4, 3, 4]);
+        entry.write_key_if_equal([10, u32::MAX - 4, 3, 4], [221, 232, 10, 20]);
+        let (key, value) = entry.read_pair();
+        assert_eq!(key, [221, 232, 10, 20]);
+        assert_eq!(value, [0]);
+    }
+
+    #[test]
+    fn write_key_if_equal_success_entails_read_key_versioned() {
+        let entry = Entry::<4, 1>::new([10, u32::MAX - 4, 3, 4]);
+        entry.write_key_if_equal([10, u32::MAX - 4, 3, 4], [221, 232, 10, 20]);
+        let (key, version) = entry.read_key_versioned();
+        assert_eq!(key, [221, 232, 10, 20]);
+        assert_eq!(version, 1 | (1 << 63));
     }
 }
