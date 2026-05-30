@@ -1,3 +1,7 @@
+[workspace]
+members = ["."]
+resolver = "3"
+
 [package]
 name = "nbcache"
 version = "0.1.0"

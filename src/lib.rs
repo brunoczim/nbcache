@@ -1,69 +1,59 @@
-use std::{
-    char,
-    hash::{BuildHasher, Hash},
-};
-
-use crate::of::OfCacheWith;
+use std::{char, marker::PhantomData};
 
 pub mod of;
 
 pub trait Cache {
-    type Key: Copy + Ord + Hash;
-    type Value: Copy + Ord + Hash;
+    type Key;
+    type Value;
 
-    fn get_raw(&self, key: Self::Key) -> Option<Self::Value>;
+    fn get(&self, key: Self::Key) -> Option<Self::Value>;
 
-    fn put_raw(&self, key: Self::Key, value: Self::Value);
+    fn put(&self, key: Self::Key, value: Self::Value);
 
-    fn delete_raw(&self, key: Self::Key) -> bool;
+    fn delete(&self, key: Self::Key) -> bool;
 }
 
-impl<H, const K: usize, const V: usize> Cache for OfCacheWith<H, K, V>
+#[derive(Debug, Clone)]
+pub struct TransformingCache<K, V, C> {
+    raw: C,
+    _marker: PhantomData<(K, V)>,
+}
+
+impl<K, V, C> TransformingCache<K, V, C> {
+    pub fn new(raw: C) -> Self {
+        Self { raw, _marker: PhantomData }
+    }
+
+    pub fn raw(&self) -> &C {
+        &self.raw
+    }
+
+    pub fn into_raw(self) -> C {
+        self.raw
+    }
+}
+
+impl<K, V, C> Cache for TransformingCache<K, V, C>
 where
-    H: BuildHasher,
+    C: Cache,
+    K: TransformInto<C::Key>,
+    V: TransformInto<C::Value> + TransformFrom<C::Value>,
 {
-    type Key = of::Key<K>;
-    type Value = of::Value<V>;
+    type Key = K;
+    type Value = V;
 
-    fn get_raw(&self, key: Self::Key) -> Option<Self::Value> {
-        self.get(key)
+    fn get(&self, key: K) -> Option<V> {
+        self.raw.get(key.encode()).map(V::decode)
     }
 
-    fn put_raw(&self, key: Self::Key, value: Self::Value) {
-        self.put(key, value);
+    fn put(&self, key: K, value: V) {
+        self.raw.put(key.encode(), value.encode());
     }
 
-    fn delete_raw(&self, key: Self::Key) -> bool {
-        self.delete(key)
-    }
-}
-
-pub trait CacheExt: Cache {
-    fn get_as<K, V>(&self, key: K) -> Option<V>
-    where
-        K: TransformInto<Self::Key>,
-        V: TransformFrom<Self::Value>,
-    {
-        self.get_raw(key.encode()).map(V::decode)
-    }
-
-    fn put_as<K, V>(&self, key: K, value: V)
-    where
-        K: TransformInto<Self::Key>,
-        V: TransformInto<Self::Value>,
-    {
-        self.put_raw(key.encode(), value.encode());
-    }
-
-    fn delete_as<K>(&self, key: K) -> bool
-    where
-        K: TransformInto<Self::Key>,
-    {
-        self.delete_raw(key.encode())
+    fn delete(&self, key: K) -> bool {
+        self.raw.delete(key.encode())
     }
 }
-
-impl<C> CacheExt for C where C: Cache {}
 
 pub trait TransformInto<T> {
     fn encode(self) -> T;
@@ -395,20 +385,26 @@ impl TransformFrom<[u32; 4]> for uuid::Uuid {
 
 #[cfg(test)]
 mod test {
-    use crate::{CacheExt, TransformFrom, TransformInto, of::OfCache};
+    use crate::{
+        Cache,
+        TransformFrom,
+        TransformInto,
+        TransformingCache,
+        of::OfCache,
+    };
 
     #[test]
     fn put_should_get_the_same() {
-        let cache = OfCache::new(5);
-        cache.put_as(0x01234567_89abcdef_u64, [3_u8, 2]);
-        assert_eq!(cache.get_as(0x01234567_89abcdef_u64,), Some([3_u8, 2]));
+        let cache = TransformingCache::new(OfCache::new(5));
+        cache.put(0x01234567_89abcdef_u64, [3_u8, 2]);
+        assert_eq!(cache.get(0x01234567_89abcdef,), Some([3_u8, 2]));
     }
 
     #[test]
     fn remove_after_put_should_be_successful() {
-        let cache = OfCache::new(5);
-        cache.put_as(0x01234567_89abcdef_u64, [3_u8, 2]);
-        assert!(cache.delete_as(0x01234567_89abcdef_u64,),);
+        let cache = TransformingCache::new(OfCache::new(5));
+        cache.put(0x01234567_89abcdef_u64, [3_u8, 2]);
+        assert!(cache.delete(0x01234567_89abcdef_u64,),);
     }
 
     #[test]

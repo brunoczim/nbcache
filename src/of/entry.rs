@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{Key, Value};
+use super::{OfKey, OfValue};
 
 fn tag_preceeds(this: u32, that: u32) -> bool {
     const HALF_DISTANCE: u32 = u32::MAX >> 1;
@@ -19,7 +19,7 @@ pub struct Entry<const K: usize, const V: usize> {
 }
 
 impl<const K: usize, const V: usize> Entry<K, V> {
-    pub fn new(key: Key<K>) -> Self {
+    pub fn new(key: OfKey<K>) -> Self {
         Self {
             version: AtomicU64::new(0),
             alternates: [
@@ -29,7 +29,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         }
     }
 
-    pub fn read_pair(&self) -> (Key<K>, Value<V>) {
+    pub fn read_pair(&self) -> (OfKey<K>, OfValue<V>) {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
         'main: loop {
@@ -59,7 +59,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         }
     }
 
-    pub fn read_key_versioned(&self) -> (Key<K>, u64) {
+    pub fn read_key_versioned(&self) -> (OfKey<K>, u64) {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
         'main: loop {
@@ -84,7 +84,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         }
     }
 
-    pub fn write_pair(&self, key: Key<K>, value: Value<V>) {
+    pub fn write_pair(&self, key: OfKey<K>, value: OfValue<V>) {
         'main: loop {
             let (prev_version, curr_version) = self.start_write();
 
@@ -136,7 +136,11 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         }
     }
 
-    pub fn write_key_if_equal(&self, expected: Key<K>, new: Key<K>) -> bool {
+    pub fn write_key_if_equal(
+        &self,
+        expected: OfKey<K>,
+        new: OfKey<K>,
+    ) -> bool {
         'main: loop {
             let (prev_version, curr_version) = loop {
                 let (curr_key, curr_version) = self.read_key_versioned();
@@ -257,7 +261,7 @@ struct EntryAlternate<const K: usize, const V: usize> {
 }
 
 impl<const K: usize, const V: usize> EntryAlternate<K, V> {
-    pub fn new(key: Key<K>, value: Value<V>, tag: u32) -> Self {
+    pub fn new(key: OfKey<K>, value: OfValue<V>, tag: u32) -> Self {
         Self {
             key: key
                 .map(u64::from)

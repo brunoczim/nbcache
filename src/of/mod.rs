@@ -2,10 +2,12 @@ use std::hash::{BuildHasher, RandomState};
 
 use entry::Entry;
 
+use crate::Cache;
+
 mod entry;
 
-pub type Key<const K: usize> = [u32; K];
-pub type Value<const V: usize> = [u32; V];
+pub type OfKey<const K: usize> = [u32; K];
+pub type OfValue<const V: usize> = [u32; V];
 
 pub type OfCache<const K: usize, const V: usize> =
     OfCacheWith<RandomState, K, V>;
@@ -14,7 +16,7 @@ pub type OfCache<const K: usize, const V: usize> =
 pub struct OfCacheWith<H, const K: usize, const V: usize> {
     entries: Box<[Entry<K, V>]>,
     build_hasher: H,
-    empty_key: Key<K>,
+    empty_key: OfKey<K>,
 }
 
 impl<const K: usize, const V: usize> OfCache<K, V> {
@@ -22,7 +24,7 @@ impl<const K: usize, const V: usize> OfCache<K, V> {
         Self::with_hasher(size, RandomState::new())
     }
 
-    pub fn with_empty(size: usize, empty_key: Key<K>) -> Self {
+    pub fn with_empty(size: usize, empty_key: OfKey<K>) -> Self {
         Self::with_hasher_and_empty(size, RandomState::new(), empty_key)
     }
 }
@@ -38,7 +40,7 @@ where
     pub fn with_hasher_and_empty(
         size: usize,
         build_hasher: H,
-        empty_key: Key<K>,
+        empty_key: OfKey<K>,
     ) -> Self {
         assert_ne!(size, 0);
 
@@ -48,8 +50,16 @@ where
         }
         Self { entries: entries.into(), build_hasher, empty_key }
     }
+}
 
-    pub fn get(&self, key: Key<K>) -> Option<Value<V>> {
+impl<H, const K: usize, const V: usize> Cache for OfCacheWith<H, K, V>
+where
+    H: BuildHasher,
+{
+    type Key = OfKey<K>;
+    type Value = OfValue<V>;
+
+    fn get(&self, key: Self::Key) -> Option<Self::Value> {
         let hash = self.build_hasher.hash_one(key);
         let size = self.entries.len() as u64;
         let index = (hash % size) as usize;
@@ -57,14 +67,14 @@ where
         if stored_key == key { Some(stored_value) } else { None }
     }
 
-    pub fn put(&self, key: Key<K>, value: Value<V>) {
+    fn put(&self, key: Self::Key, value: Self::Value) {
         let hash = self.build_hasher.hash_one(key);
         let size = self.entries.len() as u64;
         let index = (hash % size) as usize;
         self.entries[index].write_pair(key, value);
     }
 
-    pub fn delete(&self, key: Key<K>) -> bool {
+    fn delete(&self, key: Self::Key) -> bool {
         let hash = self.build_hasher.hash_one(key);
         let size = self.entries.len() as u64;
         let index = (hash % size) as usize;
@@ -83,6 +93,8 @@ impl<H, const K: usize, const V: usize> zeroize::Zeroize
 
 #[cfg(test)]
 mod test {
+    use crate::Cache;
+
     use super::OfCache;
 
     #[test]
