@@ -72,6 +72,15 @@ where
     }
 }
 
+#[cfg(feature = "zeroize")]
+impl<H, const K: usize, const V: usize> zeroize::Zeroize
+    for OfCacheWith<H, K, V>
+{
+    fn zeroize(&mut self) {
+        self.entries.zeroize();
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::OfCache;

@@ -379,6 +379,20 @@ impl TransformFrom<[u32; 1]> for [i16; 2] {
     }
 }
 
+#[cfg(feature = "uuid")]
+impl TransformInto<[u32; 4]> for uuid::Uuid {
+    fn encode(self) -> [u32; 4] {
+        self.as_u128().encode()
+    }
+}
+
+#[cfg(feature = "uuid")]
+impl TransformFrom<[u32; 4]> for uuid::Uuid {
+    fn decode(value: [u32; 4]) -> Self {
+        Self::from_u128(u128::decode(value))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{CacheExt, TransformFrom, TransformInto, of::OfCache};

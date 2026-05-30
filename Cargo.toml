@@ -3,4 +3,11 @@ name = "nbcache"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+zeroize = ["dep:zeroize"]
+uuid = ["dep:uuid"]
+chrono = ["dep:uuid"]
+
 [dependencies]
+zeroize = { version = "1.8.2", optional = true }
+uuid = { version = "1.23.2", optional = true }

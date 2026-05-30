@@ -243,6 +243,13 @@ impl<const K: usize, const V: usize> Entry<K, V> {
     }
 }
 
+#[cfg(feature = "zeroize")]
+impl<const K: usize, const V: usize> zeroize::Zeroize for Entry<K, V> {
+    fn zeroize(&mut self) {
+        self.alternates.zeroize();
+    }
+}
+
 #[derive(Debug)]
 struct EntryAlternate<const K: usize, const V: usize> {
     key: [AtomicU64; K],
@@ -261,6 +268,14 @@ impl<const K: usize, const V: usize> EntryAlternate<K, V> {
                 .map(|bits| bits | ((tag as u64) << 32))
                 .map(AtomicU64::new),
         }
+    }
+}
+
+#[cfg(feature = "zeroize")]
+impl<const K: usize, const V: usize> zeroize::Zeroize for EntryAlternate<K, V> {
+    fn zeroize(&mut self) {
+        self.key.iter().for_each(|elem| elem.store(0, Ordering::Relaxed));
+        self.value.iter().for_each(|elem| elem.store(0, Ordering::Relaxed));
     }
 }
 
