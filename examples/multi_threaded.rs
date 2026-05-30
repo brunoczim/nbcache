@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use nbcache::raw::OfCache;
+use nbcache::of::OfCache;
 
 fn main() {
     let n_threads = 8;

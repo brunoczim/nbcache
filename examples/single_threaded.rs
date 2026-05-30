@@ -1,4 +1,4 @@
-use nbcache::raw::OfCache;
+use nbcache::of::OfCache;
 
 fn main() {
     let cache = OfCache::<1, 1>::new(7);
