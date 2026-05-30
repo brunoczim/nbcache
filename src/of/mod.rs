@@ -2,7 +2,7 @@ use std::hash::{BuildHasher, RandomState};
 
 use entry::Entry;
 
-use crate::Cache;
+use crate::{Cache, CacheType};
 
 mod entry;
 
@@ -11,6 +11,11 @@ pub type OfValue<const V: usize> = [u32; V];
 
 pub type OfCache<const K: usize, const V: usize> =
     OfCacheWith<RandomState, K, V>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OfCacheType;
+
+impl CacheType for OfCacheType {}
 
 #[derive(Debug)]
 pub struct OfCacheWith<H, const K: usize, const V: usize> {
@@ -58,6 +63,7 @@ where
 {
     type Key = OfKey<K>;
     type Value = OfValue<V>;
+    type Type = OfCacheType;
 
     fn get(&self, key: Self::Key) -> Option<Self::Value> {
         let hash = self.build_hasher.hash_one(key);
