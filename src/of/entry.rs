@@ -1,4 +1,8 @@
+#[cfg(not(feature = "loom"))]
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(feature = "loom")]
+use loom::sync::atomic::{AtomicU64, Ordering};
 
 use super::{OfKey, OfValue};
 

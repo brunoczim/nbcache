@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "loom-test"]
 resolver = "3"
 
 [package]
@@ -10,7 +10,9 @@ edition = "2024"
 [features]
 zeroize = ["dep:zeroize"]
 uuid = ["dep:uuid"]
+loom = ["dep:loom"]
 
 [dependencies]
 zeroize = { version = "1.8.2", optional = true }
 uuid = { version = "1.23.2", optional = true }
+loom = { version = "0.7.2", optional = true }

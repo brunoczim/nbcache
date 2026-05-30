@@ -1,0 +1,10 @@
+[package]
+name = "loom-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+loom = { version = "0.7.2" }
+nbcache = { path = "../", features = ["loom", "uuid"] }
+uuid = { version = "1.23.2", features = ["v4"] }
+rand = "0.10.1"

@@ -856,9 +856,9 @@ mod test {
     #[test]
     #[cfg(feature = "uuid")]
     fn encode_uuid_into_u32_array() {
-        let output = TransformInto::<[u32; 4]>::encode(
-            0x1234_5678_90ab_cdef_fedc_ba90_8765_4321_i128,
-        );
+        let output = TransformInto::<[u32; 4]>::encode(uuid::Uuid::from_u128(
+            0x1234_5678_90ab_cdef_fedc_ba90_8765_4321_u128,
+        ));
         assert_eq!(
             output,
             [0x8765_4321, 0xfedc_ba90, 0x90ab_cdef, 0x1234_5678]
