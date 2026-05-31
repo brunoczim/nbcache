@@ -1,1 +1,2 @@
-mod same_operations;
+mod writes;
+mod reads;

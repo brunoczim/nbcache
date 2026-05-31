@@ -8,9 +8,11 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+default = ["dev"]
 zeroize = ["dep:zeroize"]
 uuid = ["dep:uuid"]
 loom = ["dep:loom"]
+dev = []
 
 [dependencies]
 zeroize = { version = "1.8.2", optional = true }

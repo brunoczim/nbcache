@@ -1,8 +1,39 @@
+use std::hash::BuildHasher;
+
+use siphasher::sip::SipHasher;
+
+#[derive(Debug, Clone, Copy)]
+pub struct BuildSipHasher {
+    key0: u64,
+    key1: u64,
+}
+
+impl BuildSipHasher {
+    pub fn new(key0: u64, key1: u64) -> Self {
+        Self { key0, key1 }
+    }
+}
+
+impl BuildHasher for BuildSipHasher {
+    type Hasher = SipHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        SipHasher::new_with_keys(self.key0, self.key1)
+    }
+}
+
+/*
 use std::collections::HashMap;
 
+#[cfg(not(feature = "loom"))]
+use std::sync::{Arc, Mutex, mpsc};
+
+#[cfg(feature = "loom")]
 use loom::sync::{Arc, Mutex, mpsc};
+
 use nbcache::{
     Cache,
+    dev::BlockingCache,
     of::OfCache,
     transforming::{TransformInto, TransformingCache},
 };
@@ -27,10 +58,11 @@ pub fn open(cache_size: usize) -> (ClientSide, Arc<WorkerSide>) {
     };
     let worker = WorkerSide {
         cold_storage: Mutex::new(HashMap::new()),
-        cache: TransformingCache::new(OfCache::with_empty(
+        cache: BlockingCache::new(),
+        /* TransformingCache::new(OfCache::with_empty(
             cache_size,
             Uuid::nil().encode(),
-        )),
+        )), */
         rx: Mutex::new(rx),
     };
     (client, Arc::new(worker))
@@ -125,7 +157,8 @@ impl DeleteCall {
 
 #[derive(Debug)]
 pub struct WorkerSide {
-    cache: TransformingCache<Uuid, u64, OfCache<4, 2>>,
+    // TransformingCache<Uuid, u64, OfCache<4, 2>
+    cache: BlockingCache<Uuid, u64>,
     cold_storage: Mutex<HashMap<Uuid, u64>>,
     rx: Mutex<mpsc::Receiver<Request>>,
 }
@@ -162,3 +195,4 @@ impl WorkerSide {
         true
     }
 }
+*/
