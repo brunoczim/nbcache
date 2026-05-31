@@ -1,9 +1,4 @@
-#[cfg(not(feature = "loom"))]
-use std::sync::Mutex;
-use std::{collections::HashMap, hash::Hash};
-
-#[cfg(feature = "loom")]
-use loom::sync::Mutex;
+use std::{collections::HashMap, hash::Hash, sync::Mutex};
 
 use crate::{Cache, CacheType};
 

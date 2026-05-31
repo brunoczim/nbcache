@@ -1,11 +1,8 @@
 pub mod of;
 pub mod transforming;
 
-#[cfg(feature = "dev")]
-pub mod dev;
-
-#[cfg(feature = "loom")]
-mod loom_util;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 pub trait CacheType {}
 

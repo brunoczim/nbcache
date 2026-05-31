@@ -1,11 +1,4 @@
-#[cfg(not(feature = "loom"))]
 use std::sync::atomic::{AtomicU64, Ordering};
-
-#[cfg(feature = "loom")]
-use loom::sync::atomic::{AtomicU64, Ordering};
-
-#[cfg(feature = "loom")]
-use crate::loom_util::Yielder;
 
 use super::{OfKey, OfValue};
 
@@ -39,9 +32,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
     pub fn read_pair(&self) -> (OfKey<K>, OfValue<V>) {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
-        #[cfg(feature = "loom")]
-        let mut yielder = Yielder::with_default_scale(K + V);
-
         'main: loop {
             let alternate_index = (curr_version >> 63) as usize;
             let tag = curr_version & 0xff_ff_ff_ff;
@@ -55,9 +45,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 .chain(&mut value)
                 .zip(alternate.key.iter().chain(&alternate.value))
             {
-                #[cfg(feature = "loom")]
-                yielder.next();
-
                 let data = src.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 let tag_low = tag & 0xff_ff_ff_ff;
@@ -75,9 +62,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
     pub fn read_key_versioned(&self) -> (OfKey<K>, u64) {
         let mut curr_version = self.version.load(Ordering::Acquire);
 
-        #[cfg(feature = "loom")]
-        let mut yielder = Yielder::with_default_scale(K + V);
-
         'main: loop {
             let alternate_index = (curr_version >> 63) as usize;
             let tag = curr_version & 0xff_ff_ff_ff;
@@ -86,11 +70,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
             let mut key = [0; K];
 
             for (dest, src) in key.iter_mut().zip(alternate.key.iter()) {
-                #[cfg(feature = "loom")]
-                yielder.next();
-
-                #[cfg(feature = "loom")]
-                yielder.next();
                 let data = src.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 let tag_low = tag & 0xff_ff_ff_ff;
@@ -106,9 +85,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
     }
 
     pub fn write_pair(&self, key: OfKey<K>, value: OfValue<V>) {
-        #[cfg(feature = "loom")]
-        let mut yielder = Yielder::with_default_scale(K + V);
-
         'main: loop {
             let (prev_version, curr_version) = self.start_write();
 
@@ -125,9 +101,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
                 .chain(&alternate.value)
                 .zip(key.into_iter().chain(value))
             {
-                #[cfg(feature = "loom")]
-                yielder.next();
-
                 let data = dest.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 if !tag_preceeds(embedded_tag as u32, prev_tag_low as u32) {
@@ -168,9 +141,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
         expected: OfKey<K>,
         new: OfKey<K>,
     ) -> bool {
-        #[cfg(feature = "loom")]
-        let mut yielder = Yielder::with_default_scale(K + V);
-
         'main: loop {
             let (prev_version, curr_version) = loop {
                 let (curr_key, curr_version) = self.read_key_versioned();
@@ -191,9 +161,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
             let next_tag = curr_version & 0xff_ff_ff_ff;
 
             for (dest, src) in alternate.key.iter().zip(new.into_iter()) {
-                #[cfg(feature = "loom")]
-                yielder.next();
-
                 let data = dest.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 if !tag_preceeds(embedded_tag as u32, prev_tag_low as u32) {
@@ -214,9 +181,6 @@ impl<const K: usize, const V: usize> Entry<K, V> {
             }
 
             for dest in alternate.value.iter() {
-                #[cfg(feature = "loom")]
-                yielder.next();
-
                 let data = dest.load(Ordering::Relaxed);
                 let embedded_tag = data >> 32;
                 let prev_tag_low = prev_tag & 0xff_ff_ff_ff;
@@ -259,13 +223,7 @@ impl<const K: usize, const V: usize> Entry<K, V> {
     }
 
     fn start_write_from(&self, mut current: u64) -> (u64, u64) {
-        #[cfg(feature = "loom")]
-        let mut yielder = Yielder::with_default_scale(K + V);
-
         loop {
-            #[cfg(feature = "loom")]
-            yielder.next();
-
             match self.start_write_weak(current) {
                 Ok((prev, next)) => break (prev, next),
                 Err(actual) => current = actual,
