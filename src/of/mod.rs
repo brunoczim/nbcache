@@ -25,12 +25,12 @@ pub struct OfCacheWith<H, const K: usize, const V: usize> {
 }
 
 impl<const K: usize, const V: usize> OfCache<K, V> {
-    pub fn new(size: usize) -> Self {
-        Self::with_hasher(size, RandomState::new())
+    pub fn new(capacity: usize) -> Self {
+        Self::with_hasher(capacity, RandomState::new())
     }
 
-    pub fn with_empty(size: usize, empty_key: OfKey<K>) -> Self {
-        Self::with_hasher_and_empty(size, RandomState::new(), empty_key)
+    pub fn with_empty(capacity: usize, empty_key: OfKey<K>) -> Self {
+        Self::with_hasher_and_empty(capacity, RandomState::new(), empty_key)
     }
 }
 
@@ -38,19 +38,19 @@ impl<H, const K: usize, const V: usize> OfCacheWith<H, K, V>
 where
     H: BuildHasher,
 {
-    pub fn with_hasher(size: usize, build_hasher: H) -> Self {
-        Self::with_hasher_and_empty(size, build_hasher, [0; K])
+    pub fn with_hasher(capacity: usize, build_hasher: H) -> Self {
+        Self::with_hasher_and_empty(capacity, build_hasher, [0; K])
     }
 
     pub fn with_hasher_and_empty(
-        size: usize,
+        capacity: usize,
         build_hasher: H,
         empty_key: OfKey<K>,
     ) -> Self {
-        assert_ne!(size, 0);
+        assert_ne!(capacity, 0);
 
-        let mut entries = Vec::with_capacity(size);
-        for _ in 0 .. size {
+        let mut entries = Vec::with_capacity(capacity);
+        for _ in 0 .. capacity {
             entries.push(Entry::new(empty_key));
         }
         Self { entries: entries.into(), build_hasher, empty_key }
@@ -65,19 +65,19 @@ where
     type Value = OfValue<V>;
     type Type = OfCacheType;
 
+    fn put(&self, key: Self::Key, value: Self::Value) {
+        let hash = self.build_hasher.hash_one(key);
+        let size = self.entries.len() as u64;
+        let index = (hash % size) as usize;
+        self.entries[index].write_pair(key, value);
+    }
+
     fn get(&self, key: Self::Key) -> Option<Self::Value> {
         let hash = self.build_hasher.hash_one(key);
         let size = self.entries.len() as u64;
         let index = (hash % size) as usize;
         let (stored_key, stored_value) = self.entries[index].read_pair();
         if stored_key == key { Some(stored_value) } else { None }
-    }
-
-    fn put(&self, key: Self::Key, value: Self::Value) {
-        let hash = self.build_hasher.hash_one(key);
-        let size = self.entries.len() as u64;
-        let index = (hash % size) as usize;
-        self.entries[index].write_pair(key, value);
     }
 
     fn delete(&self, key: Self::Key) -> bool {
